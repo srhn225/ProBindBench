@@ -1,0 +1,16 @@
+config*
+
+.vscode/
+
+__pycache__/
+*.pyc
+*.pdb
+.env
+
+unimomo/
+
+screening/data/
+results/
+node_modules/
+
+foldx_*

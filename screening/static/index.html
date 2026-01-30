@@ -1,0 +1,688 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Structure Screening Pipeline</title>
+    <style>
+        body { font-family: sans-serif; padding: 0; margin: 0; height: 100vh; display: flex; flex-direction: column; }
+        .header { background: #333; color: white; padding: 10px 20px; display: flex; justify-content: space-between; align-items: center; }
+        .main { display: flex; flex: 1; overflow: hidden; }
+        
+        .sidebar { width: 300px; background: #f4f4f4; padding: 20px; border-right: 1px solid #ddd; display: flex; flex-direction: column; overflow-y: auto; }
+        .content { flex: 1; padding: 20px; overflow-y: auto; display: flex; flex-direction: column; }
+        
+        .section { margin-bottom: 20px; padding-bottom: 20px; border-bottom: 1px solid #ddd; }
+        .form-group { margin-bottom: 10px; }
+        label { display: block; margin-bottom: 5px; font-weight: bold; font-size: 0.9em; }
+        input[type="text"], input[type="file"] { width: 100%; padding: 6px; box-sizing: border-box; }
+        button { padding: 8px 16px; background: #007bff; color: white; border: none; cursor: pointer; border-radius: 4px; width: 100%; margin-top: 5px; }
+        button:hover { background: #0056b3; }
+        button.secondary { background: #6c757d; }
+        button.secondary:hover { background: #5a6268; }
+        button.danger { background: #dc3545; }
+        button.danger:hover { background: #c82333; }
+        
+        /* Table Styles */
+        .table-container { flex: 1; overflow: auto; border: 1px solid #ddd; margin-top: 10px; }
+        table { width: 100%; border-collapse: collapse; font-size: 0.9em; }
+        th, td { border: 1px solid #ddd; padding: 8px; text-align: left; white-space: nowrap; }
+        th { background: #eee; position: sticky; top: 0; z-index: 10; cursor: pointer; }
+        tr.selected { background-color: #e2e6ea; }
+        tr.filtered { color: #999; }
+        .filename-link { color: #007bff; text-decoration: underline; cursor: pointer; }
+        
+        .history-list { font-size: 0.9em; }
+        .history-item { padding: 8px; border-bottom: 1px solid #eee; cursor: pointer; display: flex; justify-content: space-between; align-items: center; }
+        .history-item:hover, .history-item.active { background-color: #ddd; }
+        
+        .status-badge { padding: 2px 6px; border-radius: 4px; font-size: 0.8em; color: white; }
+        .status-pending { background: #ffc107; color: black; }
+        .status-active { background: #28a745; }
+        .status-filtered { background: #6c757d; }
+        
+        .filter-controls { display: flex; gap: 5px; align-items: center; }
+        .filter-controls select, .filter-controls input { width: auto; flex: 1; }
+
+        /* Modal & Viewer */
+        .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1000; justify-content: center; align-items: center; }
+        .modal.open { display: flex; }
+        .modal-content { background: white; width: 90%; height: 90%; border-radius: 8px; display: flex; flex-direction: column; padding: 20px; overflow: hidden; position: relative; }
+        .modal-header { display: flex; justify-content: space-between; margin-bottom: 10px; border-bottom: 1px solid #eee; padding-bottom: 10px; }
+        .viewer-container { flex: 1; position: relative; border: 1px solid #ddd; background: #eee; }
+        #pdbViewer { width: 100%; height: 100%; position: relative; }
+        .viewer-controls { margin-top: 10px; display: flex; gap: 10px; align-items: center; }
+        #seqDisplay { font-family: monospace; white-space: pre-wrap; margin-top: 10px; max-height: 100px; overflow-y: auto; background: #f8f9fa; padding: 10px; border: 1px solid #ddd; font-size: 12px; }
+    </style>
+    <!-- 3Dmol.js -->
+    <script src="https://3dmol.org/build/3Dmol-min.js"></script>
+</head>
+<body>
+    <div class="header">
+        <h2>ProBindBench Screening</h2>
+        <div>
+            <span id="jobInfo">No Job Loaded</span>
+        </div>
+    </div>
+    
+    <div class="main">
+        <div class="sidebar">
+            <div class="section">
+                <h3>Current Job</h3>
+                <div class="form-group">
+                    <label>Receptor Chain (e.g. A or A,B)</label>
+                    <input type="text" id="recChain" value="A">
+                </div>
+                <div class="form-group">
+                    <label>Ligand Chain (e.g. B or C,D)</label>
+                    <input type="text" id="ligChain" value="B">
+                </div>
+            </div>
+
+            <div class="section">
+                <h3>Select Metrics</h3>
+                <div id="metricOptions">Loading...</div>
+                <button onclick="runSelectedDependencies()" id="runBtn">Run Selected Metrics</button>
+            </div>
+
+            <div class="section">
+                <h3>Filter Results</h3>
+                <div class="filter-controls">
+                    <select id="filterMetric"></select>
+                    <select id="filterOp">
+                        <option value="gt">&gt;</option>
+                        <option value="lt">&lt;</option>
+                    </select>
+                    <input type="number" step="0.1" id="filterVal" placeholder="Val">
+                </div>
+                <div style="display:flex; gap:5px; margin-top:5px;">
+                    <button class="secondary" onclick="applyFilter('exclude')">Exclude Matching</button>
+                    <button class="secondary" onclick="applyFilter('keep')">Keep Matching Only</button>
+                </div>
+                <button class="secondary" style="margin-top:5px" onclick="restoreAll()">Restore All Files</button>
+            </div>
+            
+            <div class="section">
+                <h3>Upload New</h3>
+                <input type="file" id="newFiles" multiple accept=".pdb,.zip">
+                <button class="secondary" onclick="createNewJob()">Create New Job</button>
+            </div>
+
+             <div class="section">
+                <h3>History</h3>
+                <div id="historyList" class="history-list"></div>
+            </div>
+        </div>
+        
+        <div class="content">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+                <h3>File List (<span id="fileCount">0</span>)</h3>
+                <div>
+                     Seleced: <span id="selCount">0</span>
+                     <button class="secondary" style="width:auto; display:inline;" onclick="selectAll()">All</button>
+                     <button class="secondary" style="width:auto; display:inline;" onclick="selectNone()">None</button>
+                     <button class="secondary" style="width:auto; display:inline;" onclick="downloadSelected(this)">Download Selected</button>
+                </div>
+            </div>
+            <div class="table-container">
+                <table id="resultsTable">
+                    <thead>
+                        <tr>
+                            <th width="30"><input type="checkbox" onchange="toggleSelectAll(this)"></th>
+                            <th>Filename</th>
+                            <th>Status</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <div id="fileModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="modalFilename" style="margin:0">Filename.pdb</h3>
+                <button onclick="closeModal()" style="width: auto; background: transparent; color: #333; font-size: 1.5em; padding: 0;">&times;</button>
+            </div>
+            
+            <div style="margin-bottom: 5px; display:flex; gap:10px;">
+                <a id="downloadLink" href="#" target="_blank"><button class="secondary" style="width: auto;">Download PDB</button></a>
+                <button onclick="openOptModal()" style="width: auto; background-color: #17a2b8;">Affinity Opt</button>
+            </div>
+
+            <div class="viewer-container">
+                <div id="pdbViewer"></div>
+            </div>
+            
+            <div class="viewer-controls">
+                 <span>Rec: <b id="viewRec"></b></span>
+                 <span>Lig: <b id="viewLig"></b></span>
+                 <small style="color:#666">Mouse: Left=Rotate, Middle=Zoom, Right=Translate</small>
+            </div>
+            
+            <div id="seqDisplay">Loading sequence...</div>
+        </div>
+    </div>
+
+    <div id="optModal" class="modal">
+        <div class="modal-content" style="height:auto; max-width:400px;">
+            <div class="modal-header">
+                <h3 style="margin:0">Affinity Optimization</h3>
+                <button onclick="closeOptModal()" style="width: auto; background: transparent; color: #333; font-size: 1.5em; padding: 0;">&times;</button>
+            </div>
+            <div class="form-group">
+                <label>Optimization Steps (1-100)</label>
+                <input type="number" id="optSteps" value="16" min="1" max="100">
+            </div>
+            <div class="form-group">
+                <label>Batch Size</label>
+                <input type="number" id="optBatch" value="50">
+            </div>
+            <div class="form-group">
+                <label>Num Samples</label>
+                <input type="number" id="optSamples" value="100">
+            </div>
+            <div style="display:flex; justify-content:flex-end; gap:10px;">
+                <button class="secondary" onclick="closeOptModal()">Cancel</button>
+                <button onclick="startOptimize()">Start Optimization</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API = '/api';
+        let currentJobId = null;
+        let currentJobData = null;
+        let availableMetrics = [];
+        let selectedFiles = new Set(); 
+        let viewer = null;
+
+        function openOptModal() {
+            document.getElementById('optModal').classList.add('open');
+        }
+
+        function closeOptModal() {
+             document.getElementById('optModal').classList.remove('open');
+        }
+
+        async function startOptimize() {
+             const steps = parseInt(document.getElementById('optSteps').value);
+             const batch = parseInt(document.getElementById('optBatch').value);
+             const samples = parseInt(document.getElementById('optSamples').value);
+             const fname = document.getElementById('modalFilename').innerText;
+             
+             if(steps < 1 || steps > 100) { alert("Steps must be 1-100"); return; }
+             
+             const req = {
+                 optimize_step: steps,
+                 batch_size: batch,
+                 n_samples: samples
+             };
+             
+             try {
+                 const res = await fetch(`${API}/jobs/${currentJobId}/optimize/${fname}`, {
+                     method: 'POST', 
+                     headers: {'Content-Type': 'application/json'},
+                     body: JSON.stringify(req)
+                 });
+                 if(res.ok) {
+                     const data = await res.json();
+                     alert(data.message);
+                     closeOptModal();
+                 } else {
+                     alert("Request failed");
+                 }
+             } catch(e) {
+                 alert("Error starting optimization");
+                 console.error(e);
+             }
+        }
+
+        async function init() {
+            const res = await fetch(`${API}/metrics`);
+            const data = await res.json();
+            availableMetrics = data.metrics;
+            
+            const mContainer = document.getElementById('metricOptions');
+            const fSelect = document.getElementById('filterMetric');
+            
+            let html = '';
+            availableMetrics.forEach(m => {
+                html += `
+                    <div>
+                        <input type="checkbox" id="m_${m}" value="${m}">
+                        <label for="m_${m}" style="display:inline">${m}</label>
+                    </div>`;
+                
+                const opt = document.createElement('option');
+                opt.value = m;
+                opt.innerText = m;
+                fSelect.appendChild(opt);
+            });
+            mContainer.innerHTML = html;
+
+            loadHistory();
+        }
+
+        async function createNewJob() {
+            const files = document.getElementById('newFiles').files;
+            if (files.length === 0) { alert("Select files first"); return; }
+            
+            const formData = new FormData();
+            formData.append('rec_chain', document.getElementById('recChain').value);
+            formData.append('lig_chain', document.getElementById('ligChain').value);
+            for(let f of files) formData.append('files', f);
+
+            try {
+                const res = await fetch(`${API}/jobs`, { method: 'POST', body: formData });
+                const job = await res.json();
+                loadJob(job.id);
+                loadHistory();
+            } catch(e) { alert("Error creating job"); console.error(e); }
+        }
+
+        async function loadHistory() {
+            const res = await fetch(`${API}/history`);
+            const list = await res.json();
+            document.getElementById('historyList').innerHTML = list.map(item => {
+                const safeName = (item.name || '').replace(/'/g, "\\'");
+                return `
+                <div class="history-item ${item.id === currentJobId ? 'active':''}">
+                    <div onclick="loadJob('${item.id}')" style="flex:1; min-width: 0; padding-right: 5px;">
+                        <div style="font-weight:bold; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;" title="${item.name}">${item.name || item.id.substring(0,8)}</div>
+                        <small>${new Date(item.timestamp*1000).toLocaleString()}</small><br>
+                        <small>Files: ${item.file_count}</small>
+                    </div>
+                    <div style="display:flex; flex-direction:column; gap:2px; margin-left:5px; flex-shrink: 0;">
+                         <button style="width:auto; padding:2px 5px; font-size:10px;" onclick="renameJob('${item.id}', '${safeName}')">Edit</button>
+                         <button class="danger" style="width:auto; padding:2px 5px; font-size:10px;" onclick="deleteJob('${item.id}')">Del</button>
+                    </div>
+                </div>
+            `}).join('');
+        }
+
+        async function renameJob(id, oldName) {
+            const newName = prompt("Enter new name:", oldName);
+            if (newName && newName !== oldName) {
+                 try {
+                     await fetch(`${API}/jobs/${id}/rename`, {
+                         method: 'POST',
+                         headers: {'Content-Type': 'application/json'},
+                         body: JSON.stringify({name: newName})
+                     });
+                     loadHistory();
+                     if (currentJobId === id) loadJob(id); // Reload header if current
+                 } catch(e) { alert("Rename failed"); }
+            }
+        }
+
+        async function deleteJob(id) {
+            if (confirm("Are you sure you want to delete this job?")) {
+                try {
+                     await fetch(`${API}/jobs/${id}`, { method: 'DELETE' });
+                     if (currentJobId === id) {
+                         currentJobId = null;
+                         currentJobData = null;
+                         document.getElementById('jobInfo').innerText = "No Job Loaded";
+                         document.querySelector('#resultsTable tbody').innerHTML = "";
+                     }
+                     loadHistory();
+                 } catch(e) { alert("Delete failed"); }
+            }
+        }
+
+        async function loadJob(id) {
+            currentJobId = id;
+            const res = await fetch(`${API}/jobs/${id}`);
+            currentJobData = await res.json();
+            
+            document.getElementById('jobInfo').innerText = `Job: ${currentJobData.name || id.substring(0,8)}...`;
+            document.getElementById('recChain').value = currentJobData.rec_chain || 'A';
+            document.getElementById('ligChain').value = currentJobData.lig_chain || 'B';
+            
+            renderTable();
+            loadHistory(); 
+        }
+
+        function renderTable() {
+            if (!currentJobData) return;
+            const tbody = document.querySelector('#resultsTable tbody');
+            const theadTr = document.querySelector('#resultsTable thead tr');
+            
+            let headers = ['Select', 'Filename', 'Status'];
+            let metricCols = availableMetrics; 
+            
+            theadTr.innerHTML = `
+                <th width="30"><input type="checkbox" id="masterCheck" onchange="toggleSelectAll(this)"></th>
+                <th onclick="sort('filename')" style="cursor: pointer;">Filename${getSortIndicator('filename')}</th>
+                <th onclick="sort('status')" style="cursor: pointer;">Status${getSortIndicator('status')}</th>
+                ${metricCols.map(m => `<th onclick="sort('${m}')" style="cursor: pointer;">${m}${getSortIndicator(m)}</th>`).join('')}
+            `;
+
+            let visibleCount = 0;
+            const files = currentJobData.files;
+            
+            const sortedKeys = Object.keys(files).sort((a,b) => {
+                let valA, valB;
+                
+                if (currentSortCol === 'filename') {
+                    valA = a;
+                    valB = b;
+                } else if (currentSortCol === 'status') {
+                    valA = files[a].status;
+                    valB = files[b].status;
+                } else {
+                    // Metric sort
+                    valA = files[a].scores[currentSortCol];
+                    valB = files[b].scores[currentSortCol];
+                    
+                    // Handle null/undefined - always put at bottom
+                    if ((valA === null || valA === undefined) && (valB === null || valB === undefined)) return 0;
+                    if (valA === null || valA === undefined) return 1;
+                    if (valB === null || valB === undefined) return -1;
+                }
+
+                if (valA < valB) return -1 * sortDir;
+                if (valA > valB) return 1 * sortDir;
+                return 0;
+            }); 
+
+            let rowsHtml = '';
+            sortedKeys.forEach(fname => {
+                const fData = files[fname];
+                if (fData.status === 'filtered') return; 
+                
+                visibleCount++;
+                const isFiltered = fData.status === 'filtered';
+                const isSelected = selectedFiles.has(fname);
+
+                let tds = '';
+                metricCols.forEach(m => {
+                    let val = fData.scores[m];
+                    if (val === undefined || val === null) val = '-';
+                    else if (typeof val === 'number') val = val.toFixed(4);
+                    tds += `<td>${val}</td>`;
+                });
+
+                rowsHtml += `
+                    <tr class="${isSelected?'selected':''} ${isFiltered?'filtered':''}">
+                        <td><input type="checkbox" value="${fname}" ${isSelected?'checked':''} onchange="toggleFile('${fname}')" ${isFiltered?'disabled':''}></td>
+                        <td><span class="filename-link" onclick="openFileViewer('${fname}')">${fname}</span></td>
+                        <td><span class="status-badge status-${fData.status}">${fData.status}</span></td>
+                        ${tds}
+                    </tr>
+                `;
+            });
+
+            tbody.innerHTML = rowsHtml;
+            document.getElementById('fileCount').innerText = visibleCount;
+            updateSelCount();
+        }
+        
+        async function openFileViewer(fname) {
+             const url = `${API}/jobs/${currentJobId}/files/${fname}`;
+             document.getElementById('fileModal').classList.add('open');
+             document.getElementById('modalFilename').innerText = fname;
+             document.getElementById('downloadLink').href = url;
+             document.getElementById('viewRec').innerText = currentJobData.rec_chain || 'A';
+             document.getElementById('viewLig').innerText = currentJobData.lig_chain || 'B';
+             document.getElementById('seqDisplay').innerText = "Loading PDB...";
+
+             try {
+                const res = await fetch(url);
+                const pdbData = await res.text();
+                
+                initViewer(pdbData);
+                parseAndShowSeq(pdbData);
+
+             } catch(e) {
+                 console.error(e);
+                 document.getElementById('seqDisplay').innerText = "Error loading PDB";
+             }
+        }
+
+        function closeModal() {
+            document.getElementById('fileModal').classList.remove('open');
+            if(viewer) viewer.clear();
+        }
+
+        function initViewer(pdbData) {
+            const element = document.getElementById('pdbViewer');
+            if (!viewer) {
+                viewer = $3Dmol.createViewer(element, { backgroundColor: 'white' });
+            }
+            viewer.clear();
+            viewer.addModel(pdbData, "pdb");
+            
+            const recChain = currentJobData.rec_chain || 'A';
+            const ligChain = currentJobData.lig_chain || 'B';
+            
+            for(let c of recChain) { 
+                 viewer.setStyle({chain: c}, {cartoon: {color: 'spectrum'}});
+            }
+            for(let c of ligChain) {
+                 viewer.setStyle({chain: c}, {stick: {colorscheme: 'greenCarbon'}});
+            }
+            
+            viewer.zoomTo();
+            viewer.render();
+        }
+
+        function parseAndShowSeq(pdbData) {
+            const chains = {};
+            const lines = pdbData.split('\n');
+            const AA_MAP = {
+                'ALA':'A','ARG':'R','ASN':'N','ASP':'D','CYS':'C',
+                'GLN':'Q','GLU':'E','GLY':'G','HIS':'H','ILE':'I',
+                'LEU':'L','LYS':'K','MET':'M','PHE':'F','PRO':'P',
+                'SER':'S','THR':'T','TRP':'W','TYR':'Y','VAL':'V',
+                'DA':'A','DC':'C','DG':'G','DT':'T','DU':'U'
+            };
+            
+            let lastResId = null;
+            
+            lines.forEach(line => {
+                if (line.startsWith("ATOM")) {
+                    const chain = line[21];
+                    const resName = line.substring(17, 20).trim();
+                    const resSeq = line.substring(22, 26).trim();
+                    const resId = chain +  resSeq;
+                    
+                    if (resId !== lastResId) {
+                         if (!chains[chain]) chains[chain] = [];
+                         let aa = AA_MAP[resName] || '?';
+                         chains[chain].push(aa);
+                         lastResId = resId;
+                    }
+                }
+            });
+            
+            let html = '';
+            for (let c in chains) {
+                html += `> Chain ${c} (${chains[c].length} residues)\n`;
+                html += chains[c].join('') + '\n\n';
+            }
+            document.getElementById('seqDisplay').innerText = html;
+        }
+
+        function toggleFile(fname) {
+            if (selectedFiles.has(fname)) selectedFiles.delete(fname);
+            else selectedFiles.add(fname);
+            renderTable();
+        }
+
+        function toggleSelectAll(source) {
+            const files = currentJobData.files;
+            Object.keys(files).forEach(fname => {
+                if (files[fname].status !== 'filtered') {
+                    if (source.checked) selectedFiles.add(fname);
+                    else selectedFiles.delete(fname);
+                }
+            });
+            renderTable();
+        }
+        
+        function selectAll() {
+            document.getElementById('masterCheck').checked = true;
+            toggleSelectAll({checked:true});
+        }
+        
+        function selectNone() {
+            document.getElementById('masterCheck').checked = false;
+            toggleSelectAll({checked:false});
+        }
+
+        function updateSelCount() {
+            document.getElementById('selCount').innerText = selectedFiles.size;
+        }
+
+        async function runSelectedDependencies() {
+            if (!currentJobId) return;
+            const metrics = Array.from(document.querySelectorAll('#metricOptions input:checked')).map(i => i.value);
+            if (metrics.length === 0) { alert("Select metrics"); return; }
+            if (selectedFiles.size === 0) { alert("Select files (checkboxes in table)"); return; }
+            
+            const btn = document.getElementById('runBtn');
+            btn.disabled = true;
+            btn.innerText = "Running...";
+            
+            const req = {
+                files: Array.from(selectedFiles),
+                metrics: metrics,
+                rec_chain: document.getElementById('recChain').value,
+                lig_chain: document.getElementById('ligChain').value
+            };
+            
+            try {
+                const res = await fetch(`${API}/jobs/${currentJobId}/run`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(req)
+                });
+                
+                currentJobData = await res.json();
+                renderTable();
+            } catch(e) {
+                console.error(e);
+                alert("Run failed");
+            } finally {
+                btn.disabled = false;
+                btn.innerText = "Run Selected Metrics";
+            }
+        }
+
+        async function applyFilter(action) {
+            const metric = document.getElementById('filterMetric').value;
+            const op = document.getElementById('filterOp').value;
+            const val = parseFloat(document.getElementById('filterVal').value);
+            
+            if (isNaN(val)) { alert("Enter numeric value"); return; }
+            if (!metric) return;
+            
+            const updates = {};
+            
+            Object.keys(currentJobData.files).forEach(fname => {
+                const fData = currentJobData.files[fname];
+                if (fData.status === 'filtered') return; 
+                
+                const score = fData.scores[metric];
+                if (score === null || score === undefined) return; 
+                
+                let matches = false;
+                if (op === 'gt' && score > val) matches = true;
+                if (op === 'lt' && score < val) matches = true;
+                
+                if (action === 'exclude') {
+                    if (matches) updates[fname] = 'filtered';
+                } else if (action === 'keep') {
+                    if (!matches) updates[fname] = 'filtered';
+                }
+            });
+            
+            if (Object.keys(updates).length === 0) { alert("No files matched filter"); return; }
+            
+            await sendStatusUpdates(updates);
+        }
+
+        async function restoreAll() {
+             const updates = {};
+             Object.keys(currentJobData.files).forEach(fname => {
+                 updates[fname] = 'active'; 
+             });
+             await sendStatusUpdates(updates);
+        }
+
+        async function downloadSelected(btn) {
+            if (selectedFiles.size === 0) { alert("Select files to download"); return; }
+            
+            const originalText = btn.innerText;
+            btn.innerText = "Zipping...";
+            btn.disabled = true;
+
+            try {
+                const res = await fetch(`${API}/jobs/${currentJobId}/download_batch`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({files: Array.from(selectedFiles)})
+                });
+                
+                if (res.ok) {
+                    const blob = await res.blob();
+                    const url = window.URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `job_${currentJobId.substring(0,8)}_selected.zip`; 
+                    document.body.appendChild(a); 
+                    a.click();    
+                    a.remove();
+                    window.URL.revokeObjectURL(url);
+                } else {
+                    alert("Download failed");
+                }
+            } catch(e) {
+                console.error(e);
+                alert("Error downloading");
+            } finally {
+                btn.innerText = originalText;
+                btn.disabled = false;
+            }
+        }
+
+        async function sendStatusUpdates(updates) {
+             const res = await fetch(`${API}/jobs/${currentJobId}/status`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({updates: updates})
+            });
+            currentJobData = await res.json();
+            Object.keys(updates).forEach(f => {
+                if (updates[f] === 'filtered') selectedFiles.delete(f);
+            });
+            renderTable();
+        }
+
+        let currentSortCol = 'filename';
+        let sortDir = 1; // 1 for asc, -1 for desc
+
+        function sort(col) {
+            if (currentSortCol === col) {
+                sortDir *= -1;
+            } else {
+                currentSortCol = col;
+                sortDir = 1;
+            }
+            renderTable();
+        }
+
+        function getSortIndicator(col) {
+            if (currentSortCol !== col) return '';
+            return sortDir === 1 ? ' ▲' : ' ▼';
+        }
+
+
+        init();
+    </script>
+</body>
+</html>

@@ -1,0 +1,43 @@
+name: probindbench
+channels:
+  - pytorch
+  - nvidia
+  - bioconda
+  - conda-forge
+  - pyg
+  - defaults
+dependencies:
+  - python=3.10
+  - pytorch::pytorch=2.5.1
+  - pytorch::pytorch-cuda=12.4
+  - biopython
+  - biotite
+  - scikit-learn
+  - scipy
+  - pandas
+  - tensorboard
+  - mmseqs2
+  - openmm
+  - openbabel
+  - pdbfixer
+  - dockq
+  - plip
+  - tqdm
+  - easydict
+  - wandb
+  - sympy
+  - packaging
+  - networkx
+  - rdkit
+  - vina
+  - fastapi
+  - uvicorn
+  - python-multipart
+  - pyyaml
+  - pip
+  - pip:
+    - torch-scatter
+    - meeko
+    - posebusters
+    - ray
+    - openpyxl
