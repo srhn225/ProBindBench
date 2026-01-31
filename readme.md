@@ -60,7 +60,7 @@ vina --version
 #### FoldX (结合能预测)
 
 在[Foldx官网](https://foldxsuite.crg.eu/)上申请并且下载对应的可执行文件，放在`evaluation/dG/foldx5`中即可。
-#### PyRosetta (高精度能量评估)
+#### PyRosetta (基于物理立场的能量评估)
 **注意**：PyRosetta 需要学术/商业授权。请访问 [PyRosetta官网](https://www.pyrosetta.org/downloads) 获取授权账号。
 
 获取授权后，可通过以下方式安装（推荐使用 Conda）：
